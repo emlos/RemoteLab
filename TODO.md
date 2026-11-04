@@ -8,3 +8,5 @@
 # TO DO
 5. modul js ktory uzywa faceapi [link](https://github.com/justadudewhohacks/face-api.js/blob/master/README.md)
 6. napisanie+podlaczenie css do plikow html (jeden wspolny css)
+7. baza danych CRUD [model experiment 1, 2 atrubuty]
+8. modele do bazy danych, po rozmowie z innymi grupami
