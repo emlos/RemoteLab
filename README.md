@@ -3,6 +3,8 @@
 
 Każde zadanie: osobna gałąź -> pull request do `main` -> review jednej osoby -> **Squash and merge**. Głebsza rozpiska w [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
+edycja schematu danych/dodawanie tabel kolumn etc - [rozpiska i tutorial w DATABASE.md](docs\DATABASE.md)
+
 # instalacja
 
 wymagainia: Python 3.14, PostgreSQL i powershell. instalacje zrob tylko przy **pierwszym** uruchomieniu na danym komputerze. git zapisuje tylko migracje opisujące strukturę bazy, dane jake dodasz beda tylko na twoim kompie
@@ -11,7 +13,7 @@ wymagainia: Python 3.14, PostgreSQL i powershell. instalacje zrob tylko przy **p
 
 1. [pobierz instalator](https://www.postgresql.org/download/windows/) i zainstaluj serwer postresql. 
 
-2. Podczas instalacji ustaw i zapamiętaj hasło użytkownika `postgres`; domyślny port to `5432`.
+2. ustaw i zapamiętaj hasło użytkownika `postgres` (wpisz do .env, ponizej rozpisane); domyślny port to `5432`
 
 3. otwórz pgAdmin, polacz się z lokalnym serwerem i stworz pustą bazę o nazwie `ipz` (`Databases` -> `Create` -> `Database`). nic innego nie musisz robic.
 
@@ -40,7 +42,7 @@ po koleji:
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-po pobraniu przyszłych zmian z Git uruchom ponownie `alembic upgrade head`. instalujesz tylko raz, upgrade head robisz po kazdym pullu!
+> **WAZNE:** po `git pull` uruchom ponownie `alembic upgrade head`. instalujesz tylko raz, upgrade head robisz po kazdym pullu!
 
 # uruchamianie
 
