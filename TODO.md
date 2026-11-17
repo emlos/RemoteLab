@@ -5,6 +5,11 @@
 3. routowanie serwera \[Weronika\]
 4. basic db connection (postegresql) \[Weronika\]
 5. baza danych CRUD \[Weronika\]
+6. obsługa zgody na kamerkę u użytkownika - rozpatrzenie również przypadku gdy użytkownik cofnie zgodę na udostępnianie jej \[Kinga\]
+7. kalibracja - wyświetlanie 9 pkt \[Kinga\]
+8. informacja czy twarz jest/nie jest widoczna \[Kinga\]
+9. przerwanie testu w przypadku braku widocznej twarzy, gdy znów jest widoczna - kontynuacja testu \[Kinga\]
+10. info o zakończonej kalibracji \[Kinga\]
 
 # TO DO
 5. modul js ktory uzywa faceapi [link](https://github.com/justadudewhohacks/face-api.js/blob/master/README.md)
