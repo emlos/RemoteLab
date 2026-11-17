@@ -40,3 +40,34 @@ def get_experiment() -> list[dict]:
             }
             for row in rows
         ]
+
+def update_experiment(experiment_id: int, name: str, config: dict) -> bool:
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE experiments
+                SET name = %s, config = %s
+                WHERE id = %s
+                RETURNING id
+                """,
+                (name, json.dumps(config), experiment_id),
+            )
+            updated = cur.fetchone()
+
+    return updated is not None
+
+def delete_experiment(experiment_id: int) -> bool:
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM experiments
+                WHERE id = %s
+                RETURNING id
+                """,
+                (experiment_id,),
+            )
+            deleted = cur.fetchone()
+
+    return deleted is not None

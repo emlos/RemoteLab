@@ -48,3 +48,40 @@ wybierz co robisz
 
 jak skonczysz -> edytuj TODO.md i dodaj do zrobionych
 s
+
+# konfiguracja bazy danych postgresql
+1. Instalacja PostgreSQL
+
+Pobrac PostgreSQL ze strony https://www.postgresql.org/download/
+
+Zainstalowac PostgreSQL wraz z pgAdmin4
+
+Podczas instalacji ustawic haslo dla uzytkownika postgres i je zapamietac
+
+2. Utworzyc baze danych
+
+W pgAdmin4:
+
+Polaczyc sie z lokalnym serwerem PostgreSQL
+
+Prawym przyciskiem na Databases i create->database
+
+Utworzyc baze danych
+
+3. Utworzyc tabele
+
+W bazie danych otworzyc Query Tool i w nim:
+```
+CREATE TABLE experiments (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL,
+    config JSONB NOT NULL
+);
+```
+
+4. Plik .env
+
+W glownym katalogu projektu utworzyc plik .env (.env ma być w gitignore) i w nim linijka:
+
+DATABASE_URL=postgresql://postgres:TWOJE_HASLO@localhost:5432/NAZWA_BAZY_DANYCH
+
