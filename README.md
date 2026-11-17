@@ -1,4 +1,9 @@
 
+# praca z gitem
+
+Każde zadanie: osobna gałąź -> pull request do `main` -> review jednej osoby -> **Squash and merge**. Głebsza rozpiska w [CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+
 # wymagania
 
 python 3.14, windows powershell
@@ -16,7 +21,9 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-docs (auto)<http://127.0.0.1:8000/docs>
+dokumentacja api jest generowana automatycznie LOKALNIE u ciebie, kiedy serwej jest uruchomiony:  <http://127.0.0.1:8000/docs>
+
+
 
 
 # testowanie API przyklady
