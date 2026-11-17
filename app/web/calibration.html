@@ -1,14 +1,749 @@
 <!DOCTYPE html>
 <html lang="pl">
+
 <head>
     <meta charset="UTF-8">
-    <title>Kalibracja</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ipz - Kalibracja</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Kontener łączący obraz z kamery, canvas ramek oczu i punkty kalibracji */
+        #calibration-wrapper {
+            position: relative;
+            width: 100%;
+            flex: 1;
+            min-height: 550px;
+            background-color: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Podgląd kamerki (odbicie lustrzane, ukrywany po kliknięciu START) */
+        #camera {
+            position: absolute;
+            width: 640px;
+            height: 480px;
+            max-width: 90%;
+            border-radius: 15px;
+            transform: scaleX(-1);
+            object-fit: cover;
+            opacity: 0.75;
+            z-index: 1;
+        }
+
+        /* Warstwa canvas nałożona na wideo do rysowania zielonych ramek wokół oczu */
+        #eye-canvas {
+            position: absolute;
+            width: 640px;
+            height: 480px;
+            max-width: 90%;
+            border-radius: 15px;
+            transform: scaleX(-1);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Obszar, na którym wyświetlają się 9 punktów kalibracji i kropka wzroku */
+        #calibration-area {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            z-index: 3;
+        }
+
+        /* Kropka wizualizująca kierunek spojrzenia (animowana przez translate3d) */
+        #gaze-dot {
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background-color: rgba(0, 229, 255, 0.85);
+            box-shadow: 0 0 15px rgba(0, 229, 255, 0.95);
+            border: 2px solid #ffffff;
+            transform: translate(-50%, -50%);
+            will-change: transform;
+            pointer-events: none;
+            z-index: 10;
+            display: none;
+        }
+
+        #face-status {
+            position: relative;
+            z-index: 4;
+            color: white;
+            text-align: center;
+            font-size: 18px;
+            margin: 8px auto;
+        }
+    </style>
 </head>
-<body>
-    <main>
-        <h1>Kalibracja</h1>
-        <p>Strona kalibracji</p>
-        <a href="/">Powrót na stronę startową</a>
-    </main>
+
+<body class="kalibracja">
+    <!-- Górny pasek nawigacji z licznikiem postępu i przyciskiem START -->
+    <div id="kali-nav">
+        <p id="napis">Kalibracja</p>
+        <p id="napis">Postęp: 0/9</p>
+        <button id="start-button" disabled>START</button>
+    </div>
+
+    <p id="face-status">Sprawdzanie twarzy...</p>
+
+    <div id="calibration-wrapper">
+        <video id="camera" autoplay playsinline muted></video>
+        <canvas id="eye-canvas" width="640" height="480"></canvas>
+
+        <!-- 9 punktów kalibracji (środkowy jest pierwszy, aby ustawić punkt zerowy wzroku) -->
+        <div id="calibration-area">
+            <div id="gaze-dot"></div>
+
+            <div class="point" style="top: 50%; left: 50%;">+</div>
+
+            <div class="point" style="top: 10%; left: 10%;">+</div>
+            <div class="point" style="top: 10%; left: 90%;">+</div>
+
+            <div class="point" style="top: 35%; left: 35%;">×</div>
+            <div class="point" style="top: 35%; left: 65%;">×</div>
+
+            <div class="point" style="top: 65%; left: 35%;">×</div>
+            <div class="point" style="top: 65%; left: 65%;">×</div>
+
+            <div class="point" style="top: 90%; left: 10%;">+</div>
+            <div class="point" style="top: 90%; left: 90%;">+</div>
+        </div>
+    </div>
+
+    <!-- SKRYPT 1: Obsługa kamery, 9 punktów kalibracji, modeli predykcji i walidacji -->
+    <script>
+        const camera = document.getElementById("camera");
+        const eyeCanvas = document.getElementById("eye-canvas");
+        const gazeDot = document.getElementById("gaze-dot");
+        const start = document.getElementById("start-button");
+        const points = document.querySelectorAll(".point");
+        const progress = document.querySelectorAll("#kali-nav #napis")[1];
+
+        let currentPoint = 0;         // Indeks aktualnego punktu kalibracji (0..8)
+        let calibrationTimer = null;  // Timer czasu wyświetlania jednego punktu (2650 ms)
+        let sampleTimer = null;       // Timer opóźniający start zbierania próbek (450 ms)
+
+        // Zmienne globalne współdzielone między Skryptem 1 a Skryptem 2
+        window.faceDetected = false;
+        window.calibrationStarted = false;
+        window.isCollectingSamples = false;
+        window.currentSamples = [];
+        window.calibrationResults = [];
+        window.neutralGaze = null;
+        window.gazeCalibrationModel = null;
+        window.gazeAnchorModel = null;
+        window.previewGazeModel = null;
+        window.activeCalibrationTarget = null;
+        window.pointChangedAt = 0;
+        window.lastPreviewModelBuildAt = 0;
+
+        // Uruchamia kamerkę użytkownika (480x360, 30 FPS); przy błędzie cofa do welcome.html
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 480 }, height: { ideal: 360 },
+                        frameRate: { ideal: 30, max: 30 }
+                    },
+                    audio: false
+                });
+                camera.srcObject = stream;
+            } catch (error) {
+                alert("Nie udało się uruchomić kamerki.");
+                window.location.href = "/";
+            }
+        }
+        startCamera();
+
+        // Kliknięcie START: resetuje poprzednie dane, ukrywa kamerkę/ramki i uruchamia 9 punktów
+        start.addEventListener("click", function () {
+            start.disabled = true;
+            currentPoint = 0;
+            window.calibrationResults = [];
+            window.neutralGaze = null;
+            window.gazeCalibrationModel = null;
+            window.gazeAnchorModel = null;
+            window.previewGazeModel = null;
+            window.resetGazeTracking?.(true);
+
+            window.calibrationStarted = true;
+
+            camera.style.opacity = "0";
+            eyeCanvas.style.opacity = "0";
+            gazeDot.style.display = "block";
+
+            showPoint();
+        });
+
+        // Wyświetla kolejny krzyżyk, zbiera próbki po 450 ms i przelicza modele po 2650 ms
+        function showPoint() {
+            clearTimeout(calibrationTimer);
+            clearTimeout(sampleTimer);
+            window.isCollectingSamples = false;
+            window.previewGazeModel = null;
+            window.activeCalibrationTarget = null;
+            window.resetGazeTracking?.(false);
+
+            points.forEach(point => point.classList.remove("active"));
+
+            if (currentPoint >= points.length) {
+                window.calibrationStarted = false;
+                finishAndValidateCalibration();
+                return;
+            }
+
+            if (!window.faceDetected) {
+                progress.textContent = "Brak twarzy - kalibracja wstrzymana";
+                return;
+            }
+
+            const activeEl = points[currentPoint];
+            window.activeCalibrationTarget = {
+                screenX: parseFloat(activeEl.style.left),
+                screenY: parseFloat(activeEl.style.top)
+            };
+            window.pointChangedAt = performance.now();
+            activeEl.classList.add("active");
+            progress.textContent = "Postęp: " + (currentPoint + 1) + "/" + points.length;
+
+            window.currentSamples = [];
+
+            sampleTimer = setTimeout(() => {
+                if (window.calibrationStarted && window.faceDetected) {
+                    window.isCollectingSamples = true;
+                }
+            }, 450);
+
+            calibrationTimer = setTimeout(function () {
+                window.isCollectingSamples = false;
+
+                if (!window.faceDetected) {
+                    showPoint();
+                    return;
+                }
+
+                // Wymagane minimum 6 stabilnych odczytów, aby zaliczyć punkt
+                const avgEye = calculateAverageEyePosition(window.currentSamples);
+                if (!avgEye || window.currentSamples.length < 6) {
+                    progress.textContent = "Za mało odczytów – ponawianie punktu";
+                    showPoint();
+                    return;
+                }
+                const screenX = parseFloat(activeEl.style.left);
+                const screenY = parseFloat(activeEl.style.top);
+
+                window.calibrationResults.push({
+                    pointIndex: currentPoint + 1,
+                    screenX: screenX,
+                    screenY: screenY,
+                    samplesCount: window.currentSamples.length,
+                    eyeX: avgEye ? avgEye.x : null,
+                    eyeY: avgEye ? avgEye.y : null
+                });
+
+                // Pierwszy punkt (środek) ustala punkt zerowy; kolejne budują oba modele predykcji
+                if (currentPoint === 0 && avgEye) {
+                    window.neutralGaze = { x: avgEye.x, y: avgEye.y };
+                }
+                window.gazeCalibrationModel = buildGazeModel(window.calibrationResults);
+                window.gazeAnchorModel = buildAnchorModel(window.calibrationResults);
+
+                currentPoint++;
+                showPoint();
+            }, 2650);
+        }
+
+        // Wylicza średnią obciętą (odrzuca po 15% skrajnych odczytów, eliminując szum i mrugnięcia)
+        function calculateAverageEyePosition(samples) {
+            if (!samples || !samples.length) return null;
+
+            function trimmedMean(key) {
+                const values = samples.map(s => s[key]).filter(Number.isFinite).sort((a, b) => a - b);
+                if (!values.length) return null;
+                const trim = Math.floor(values.length * 0.15);
+                const middle = values.slice(trim, values.length - trim);
+                return middle.reduce((sum, val) => sum + val, 0) / middle.length;
+            }
+
+            const x = trimmedMean("x");
+            const y = trimmedMean("y");
+            return x === null || y === null ? null : { x, y };
+        }
+
+        // Tworzy model kotwic (znane punkty kalibracji + rozpiętość ruchu oczu) do interpolacji lokalnej
+        function buildAnchorModel(results) {
+            const anchors = results.filter(p => Number.isFinite(p.eyeX) &&
+                Number.isFinite(p.eyeY) && Number.isFinite(p.screenX) && Number.isFinite(p.screenY))
+                .map(p => ({ x: p.eyeX, y: p.eyeY, screenX: p.screenX, screenY: p.screenY }));
+            if (!anchors.length) return null;
+
+            const xs = anchors.map(p => p.x);
+            const ys = anchors.map(p => p.y);
+            const spreadX = Math.max(0.035, Math.max(...xs) - Math.min(...xs));
+            const spreadY = Math.max(0.025, Math.max(...ys) - Math.min(...ys));
+            return { type: "anchors", anchors, spreadX, spreadY };
+        }
+
+        // Przewiduje pozycję kropki (%) metodą odwrotnych odległości od zapisanych kotwic
+        function predictAnchorGaze(model, gaze) {
+            if (!model?.anchors?.length) return { x: 50, y: 50 };
+            if (model.anchors.length === 1) {
+                return { x: model.anchors[0].screenX, y: model.anchors[0].screenY };
+            }
+
+            let total = 0, x = 0, y = 0;
+            for (const p of model.anchors) {
+                const dx = (gaze.x - p.x) / model.spreadX;
+                const dy = (gaze.y - p.y) / model.spreadY;
+                const distance = Math.hypot(dx, dy);
+                const weight = 1 / Math.pow(distance * distance + 0.0036, 1.4);
+                total += weight;
+                x += p.screenX * weight;
+                y += p.screenY * weight;
+            }
+            return { x: x / total, y: y / total };
+        }
+
+        // Co 120 ms aktualizuje tymczasowy model podglądu z ostatnich 18 stabilnych próbek
+        window.updatePreviewGazeModel = function () {
+            const target = window.activeCalibrationTarget;
+            const samples = window.currentSamples;
+            if (!window.isCollectingSamples || !target || samples.length < 8) return;
+
+            const now = performance.now();
+            if (now - (window.lastPreviewModelBuildAt || 0) < 120) return;
+
+            const recent = samples.slice(-Math.min(samples.length, 18));
+            const avg = calculateAverageEyePosition(recent);
+            if (!avg) return;
+            const jitter = recent.reduce((sum, p) =>
+                sum + Math.hypot(p.x - avg.x, p.y - avg.y), 0) / recent.length;
+            if (jitter > 0.085) return;
+
+            window.previewGazeModel = buildAnchorModel([
+                ...window.calibrationResults,
+                { eyeX: avg.x, eyeY: avg.y, ...target }
+            ]);
+            window.lastPreviewModelBuildAt = now;
+        };
+
+        // Dopasowuje model regresji (liniowy dla < 5 punktów lub afiniczny 2D dla >= 5 punktów)
+        function buildGazeModel(results) {
+            const data = results.filter(p => Number.isFinite(p.eyeX) && Number.isFinite(p.eyeY));
+            if (data.length < 2) return null;
+
+            function fitAxis(eyeKey, screenKey) {
+                const avgEye = data.reduce((sum, p) => sum + p[eyeKey], 0) / data.length;
+                const avgScreen = data.reduce((sum, p) => sum + p[screenKey], 0) / data.length;
+                const minEye = Math.min(...data.map(p => p[eyeKey]));
+                const maxEye = Math.max(...data.map(p => p[eyeKey]));
+                if (maxEye - minEye < 0.015) return null;
+
+                const numerator = data.reduce((sum, p) => sum +
+                    (p[eyeKey] - avgEye) * (p[screenKey] - avgScreen), 0);
+                const denominator = data.reduce((sum, p) => sum +
+                    (p[eyeKey] - avgEye) ** 2, 0);
+                const slope = numerator / denominator;
+                if (!Number.isFinite(slope) || Math.abs(slope) < 40 || Math.abs(slope) > 1600) return null;
+                return { avgEye, avgScreen, slope };
+            }
+
+            const simple = {
+                type: "axes",
+                x: fitAxis("eyeX", "screenX"),
+                y: fitAxis("eyeY", "screenY")
+            };
+
+            if (data.length < 5 || !simple.x || !simple.y) return simple;
+
+            // Obliczenie macierzy kowariancji do dopasowania płaszczyzny 2D (afinicznej)
+            const mean = key => data.reduce((sum, p) => sum + p[key], 0) / data.length;
+            const mx = mean("eyeX"), my = mean("eyeY");
+            const px = mean("screenX"), py = mean("screenY");
+            let xx = 0, xy = 0, yy = 0;
+            let xTargetX = 0, yTargetX = 0, xTargetY = 0, yTargetY = 0;
+
+            for (const p of data) {
+                const dx = p.eyeX - mx;
+                const dy = p.eyeY - my;
+                xx += dx * dx;
+                xy += dx * dy;
+                yy += dy * dy;
+                xTargetX += dx * (p.screenX - px);
+                yTargetX += dy * (p.screenX - px);
+                xTargetY += dx * (p.screenY - py);
+                yTargetY += dy * (p.screenY - py);
+            }
+
+            if (xx < 0.001 || yy < 0.0005 || Math.abs(xy / Math.sqrt(xx * yy)) > 0.94) {
+                return simple;
+            }
+
+            // Regularyzacja Ridge (1.06) zapobiegająca gwałtownym przeskokom współczynników
+            const a = xx * 1.06;
+            const d = yy * 1.06;
+            const det = a * d - xy * xy;
+            const solve = (u, v) => [(u * d - v * xy) / det, (v * a - u * xy) / det];
+            const [ax, bx] = solve(xTargetX, yTargetX);
+            const [ay, by] = solve(xTargetY, yTargetY);
+            if (![ax, bx, ay, by].every(Number.isFinite) ||
+                Math.max(Math.abs(ax), Math.abs(bx), Math.abs(ay), Math.abs(by)) > 1600) {
+                return simple;
+            }
+
+            return { type: "affine", mx, my, px, py, ax, bx, ay, by };
+        }
+
+        // Waliduje wyniki po 9 punktach (liczba próbek i ruch poziomy) i zapisuje modele w localStorage
+        function finishAndValidateCalibration() {
+            const data = window.calibrationResults;
+            const hasEnoughSamples = data.every(p => p.samplesCount >= 5 && p.eyeX !== null);
+
+            const leftPoints = data.filter(p => p.screenX === 10 && p.eyeX !== null);
+            const rightPoints = data.filter(p => p.screenX === 90 && p.eyeX !== null);
+
+            let horizontalMovement = 0;
+            if (leftPoints.length > 0 && rightPoints.length > 0) {
+                const avgLeftEyeX = leftPoints.reduce((s, p) => s + p.eyeX, 0) / leftPoints.length;
+                const avgRightEyeX = rightPoints.reduce((s, p) => s + p.eyeX, 0) / rightPoints.length;
+                horizontalMovement = Math.abs(avgRightEyeX - avgLeftEyeX);
+            }
+
+            if (!hasEnoughSamples || horizontalMovement < 0.02) {
+                progress.textContent = "Błąd kalibracji - powtarzanie...";
+                alert("Kalibracja nieudana (nie wykryto wystarczającego ruchu oczu). Spróbuj ponownie, wodząc samymi oczami za punktami.");
+
+                currentPoint = 0;
+                window.calibrationResults = [];
+                window.neutralGaze = null;
+                window.gazeCalibrationModel = null;
+                window.gazeAnchorModel = null;
+                window.previewGazeModel = null;
+                window.resetGazeTracking?.(true);
+                window.calibrationStarted = true;
+                showPoint();
+                return;
+            }
+
+            localStorage.setItem("eyeCalibrationData", JSON.stringify(data));
+            localStorage.setItem("eyeCalibrationModel", JSON.stringify(window.gazeCalibrationModel));
+            localStorage.setItem("eyeCalibrationModelV2", JSON.stringify(window.gazeAnchorModel));
+            progress.textContent = "Kalibracja zakończona sukcesem!";
+            alert("Kalibracja zakończona pomyślnie! Za chwilę rozpocznie się badanie.");
+
+            window.location.href = "/experiment";
+        }
+
+        // Wznawia lub przerywa kalibrację przy zmianie wykrycia twarzy
+        window.updateCalibration = function () {
+            if (window.calibrationStarted && currentPoint < points.length) {
+                showPoint();
+            }
+        };
+    </script>
+
+
+    <!-- SKRYPT 2: MediaPipe Face Landmarker + Blendshapes (śledzenie oczu i animacja kropki) -->
+    <script type="module">
+        import { FaceLandmarker, FilesetResolver }
+            from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs";
+
+        const faceStatus = document.getElementById("face-status");
+        const video = document.getElementById("camera");
+        const canvas = document.getElementById("eye-canvas");
+        const ctx = canvas.getContext("2d");
+
+
+        // Indeksy punktów siatki MediaPipe dla kącików, powiek i źrenic obu oczu
+        const LEFT_EYE = { left: 33, right: 133, top: 159, bottom: 145, iris: 468 };
+        const RIGHT_EYE = { left: 362, right: 263, top: 386, bottom: 374, iris: 473 };
+
+        let smoothX = 50;             // Aktualna wygładzona pozycja X kropki (%)
+        let smoothY = 50;             // Aktualna wygładzona pozycja Y kropki (%)
+        let targetX = 50;             // Docelowa pozycja X z modelu (%)
+        let targetY = 50;             // Docelowa pozycja Y z modelu (%)
+        let blinkCooldownUntil = 0;   // Czas (ms) ignorowania klatek po mrugnięciu
+        let filteredRaw = null;       // Przefiltrowany surowy wektor spojrzenia
+        const rawHistory = [];        // Bufor 3 klatek do filtru medianowego
+        let lastAnimationTime = 0;
+
+        // Śledzi wymiary obszaru kalibracji do przeliczania % na piksele
+        const calibrationArea = document.getElementById("calibration-area");
+        let areaWidth = calibrationArea.clientWidth;
+        let areaHeight = calibrationArea.clientHeight;
+        new ResizeObserver(() => {
+            areaWidth = calibrationArea.clientWidth;
+            areaHeight = calibrationArea.clientHeight;
+        }).observe(calibrationArea);
+
+        // Resetuje filtry i ustawia kropkę z powrotem na środku (50%, 50%)
+        window.resetGazeTracking = function (fullReset = false) {
+            if (fullReset) {
+                smoothX = targetX = 50;
+                smoothY = targetY = 50;
+                filteredRaw = null;
+                rawHistory.length = 0;
+                lastAnimationTime = 0;
+                gazeDot.style.left = "0";
+                gazeDot.style.top = "0";
+                gazeDot.style.transform = "translate3d(0, 0, 0) translate(-50%, -50%)";
+            }
+        };
+
+        // Odczytuje kierunek spojrzenia z Blendshapes MediaPipe; zwraca null podczas mrugnięcia
+        function getBlendshapeGaze(blendshapes) {
+            const categories = blendshapes?.[0]?.categories;
+            if (!categories?.length) return null;
+
+            const scores = Object.create(null);
+            for (const cat of categories) scores[cat.categoryName] = cat.score;
+            const score = name => scores[name] ?? 0;
+            const now = performance.now();
+
+            if (score("eyeBlinkLeft") > 0.60 || score("eyeBlinkRight") > 0.60) {
+                blinkCooldownUntil = now + 90;
+                return null;
+            }
+            if (now < blinkCooldownUntil) return null;
+
+            const x = (score("eyeLookInLeft") + score("eyeLookOutRight") -
+                score("eyeLookOutLeft") - score("eyeLookInRight")) / 2;
+            const y = (score("eyeLookDownLeft") + score("eyeLookDownRight") -
+                score("eyeLookUpLeft") - score("eyeLookUpRight")) / 2;
+
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+        }
+
+        // Filtruje odczyt (mediana + wygładzanie adaptacyjne) i wyznacza docelową pozycję kropki
+        function updateGazeDot(rawX, rawY) {
+            if (!window.calibrationStarted) return;
+
+            rawHistory.push({ x: rawX, y: rawY });
+            if (rawHistory.length > 3) rawHistory.shift();
+            const median = key => rawHistory.map(v => v[key]).sort((a, b) => a - b)[Math.floor(rawHistory.length / 2)];
+            const measured = { x: median("x"), y: median("y") };
+            if (!filteredRaw) filteredRaw = measured;
+            else {
+                const change = Math.hypot(measured.x - filteredRaw.x, measured.y - filteredRaw.y);
+                const alpha = change > 0.08 ? 0.72 : change > 0.03 ? 0.55 : 0.36;
+                filteredRaw.x += (measured.x - filteredRaw.x) * alpha;
+                filteredRaw.y += (measured.y - filteredRaw.y) * alpha;
+            }
+
+            const pointAge = performance.now() - (window.pointChangedAt || 0);
+
+            // Przez pierwsze 520 ms po zmianie punktu czekamy na przeniesienie wzroku
+            if (window.activeCalibrationTarget && pointAge < 520) {
+                return;
+            }
+
+            if (window.isCollectingSamples) {
+                window.updatePreviewGazeModel?.();
+            }
+
+            let model = window.previewGazeModel;
+            const anchorCount = window.gazeAnchorModel?.anchors?.length ?? 0;
+            if (!model && anchorCount >= 2) {
+                model = window.gazeAnchorModel;
+            }
+
+            if (model) {
+                const prediction = predictAnchorGaze(model, filteredRaw);
+                targetX = Math.max(10, Math.min(90, prediction.x));
+                targetY = Math.max(10, Math.min(90, prediction.y));
+                return;
+            }
+
+            // Przy < 2 punktach delikatnie kierujemy kropkę w stronę aktywnego krzyżyka
+            if (window.activeCalibrationTarget && window.currentSamples.length >= 4) {
+                const pull = Math.min(0.20, 0.05 + window.currentSamples.length * 0.01);
+                targetX += (window.activeCalibrationTarget.screenX - targetX) * pull;
+                targetY += (window.activeCalibrationTarget.screenY - targetY) * pull;
+            }
+        }
+
+        // Pętla animacji 60 FPS płynnie przesuwająca kropkę do celu (niezależnie od FPS kamery)
+        function animateGazeDot(now) {
+            const elapsed = lastAnimationTime ? (now - lastAnimationTime) / 1000 : 1 / 60;
+            lastAnimationTime = now;
+
+            if (window.calibrationStarted && window.faceDetected) {
+                const dt = Math.max(0.001, Math.min(0.05, elapsed));
+                const distance = Math.hypot(targetX - smoothX, targetY - smoothY);
+                const tau = distance > 12 ? 0.065 : distance > 4 ? 0.085 : 0.12;
+                const alpha = 1 - Math.exp(-dt / tau);
+                if (distance > 0.07) {
+                    smoothX += (targetX - smoothX) * alpha;
+                    smoothY += (targetY - smoothY) * alpha;
+                }
+                const pixelX = areaWidth * smoothX / 100;
+                const pixelY = areaHeight * smoothY / 100;
+                gazeDot.style.transform = `translate3d(${pixelX}px, ${pixelY}px, 0) translate(-50%, -50%)`;
+                gazeDot.style.display = "block";
+            }
+            requestAnimationFrame(animateGazeDot);
+        }
+        requestAnimationFrame(animateGazeDot);
+
+        // Rysuje zieloną ramkę wokół oka i czerwoną kropkę na źrenicy (tylko przed START)
+        function drawEyeBox(landmarks, eyeIndices) {
+            const leftCorner = landmarks[eyeIndices.left];
+            const rightCorner = landmarks[eyeIndices.right];
+            const topLid = landmarks[eyeIndices.top];
+            const bottomLid = landmarks[eyeIndices.bottom];
+            const iris = landmarks[eyeIndices.iris];
+
+            if (!iris) return;
+
+            const xMin = Math.min(leftCorner.x, rightCorner.x) * canvas.width - 8;
+            const xMax = Math.max(leftCorner.x, rightCorner.x) * canvas.width + 8;
+            const yMin = Math.min(topLid.y, bottomLid.y) * canvas.height - 8;
+            const yMax = Math.max(topLid.y, bottomLid.y) * canvas.height + 8;
+
+            ctx.strokeStyle = "#00ff00";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
+
+            ctx.fillStyle = "#ff0000";
+            ctx.beginPath();
+            ctx.arc(iris.x * canvas.width, iris.y * canvas.height, 3, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // Ładuje model MediaPipe (GPU z fallbackiem na CPU) i uruchamia pętlę detekcji twarzy
+        async function detectFace() {
+            try {
+                faceStatus.textContent = "Ładowanie modelu wykrywania oczu...";
+
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm"
+                );
+
+                const options = delegate => ({
+                    baseOptions: {
+                        modelAssetPath:
+                            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        delegate
+                    },
+                    outputFaceBlendshapes: true,
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
+                let faceLandmarker;
+                try {
+                    faceLandmarker = await FaceLandmarker.createFromOptions(vision, options("GPU"));
+                } catch (gpuError) {
+                    console.info("GPU niedostępne, używam CPU.", gpuError);
+                    faceLandmarker = await FaceLandmarker.createFromOptions(vision, options("CPU"));
+                }
+
+                let lastVideoTime = -1;
+                let lastFrameTime = performance.now();
+                let lastDetectionTime = 0;
+                let missingFaceFrames = 0;
+
+                // Główna pętla analizy klatek wideo (max 30 FPS)
+                function checkFace() {
+                    const now = performance.now();
+                    if (now - lastDetectionTime < 33) {
+                        requestAnimationFrame(checkFace);
+                        return;
+                    }
+                    try {
+                        if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+                            lastVideoTime = video.currentTime;
+                            lastFrameTime = now;
+                            lastDetectionTime = now;
+
+                            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                                canvas.width = video.videoWidth;
+                                canvas.height = video.videoHeight;
+                            }
+
+                            if (!window.calibrationStarted) {
+                                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            }
+
+                            const result = faceLandmarker.detectForVideo(video, now);
+                            const hasFace = result.faceLandmarks.length > 0;
+                            missingFaceFrames = hasFace ? 0 : missingFaceFrames + 1;
+                            const detected = hasFace || (window.faceDetected && missingFaceFrames < 5);
+
+                            if (window.faceDetected !== detected) {
+                                window.faceDetected = detected;
+                                if (window.updateCalibration) {
+                                    window.updateCalibration();
+                                }
+                            }
+
+                            if (hasFace) {
+                                if (faceStatus.textContent !== "Twarz i oczy wykryte") {
+                                    faceStatus.textContent = "Twarz i oczy wykryte";
+                                }
+                                if (!window.calibrationStarted) {
+                                    const landmarks = result.faceLandmarks[0];
+                                    drawEyeBox(landmarks, LEFT_EYE);
+                                    drawEyeBox(landmarks, RIGHT_EYE);
+                                }
+
+                                const gaze = getBlendshapeGaze(result.faceBlendshapes);
+
+                                if (gaze) {
+                                    if (window.isCollectingSamples) {
+                                        window.currentSamples.push(gaze);
+                                    }
+                                    if (window.calibrationStarted) {
+                                        updateGazeDot(gaze.x, gaze.y);
+                                    }
+                                }
+                            } else if (!detected) {
+                                if (faceStatus.textContent !== "Nie wykryto twarzy - ustaw się przed kamerą") {
+                                    faceStatus.textContent = "Nie wykryto twarzy - ustaw się przed kamerą";
+                                }
+                                gazeDot.style.display = "none";
+                            }
+
+                            if (!window.calibrationStarted) {
+                                if (start.disabled !== !detected) start.disabled = !detected;
+                            }
+                        }
+                    } catch (error) {
+                        faceStatus.textContent = "Błąd wykrywania twarzy";
+                        console.error(error);
+                        return;
+                    }
+
+                    // Zabezpieczenie przed zawieszeniem strumienia z kamerki (> 1s bez nowej klatki)
+                    if (performance.now() - lastFrameTime > 1000 && window.faceDetected) {
+                        window.faceDetected = false;
+                        gazeDot.style.display = "none";
+                        faceStatus.textContent = "Brak aktualnego obrazu z kamery";
+                        if (window.updateCalibration) {
+                            window.updateCalibration();
+                        }
+                    }
+
+                    requestAnimationFrame(checkFace);
+                }
+
+                checkFace();
+
+            } catch (error) {
+                faceStatus.textContent = "Błąd ładowania MediaPipe";
+                console.error(error);
+            }
+        }
+
+        detectFace();
+    </script>
+
 </body>
+
 </html>
