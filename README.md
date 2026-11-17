@@ -47,4 +47,7 @@ wejdz do tego pliku: [todo.md](TODO.md)
 wybierz co robisz
 
 jak skonczysz -> edytuj TODO.md i dodaj do zrobionych
-s
+
+## praca z gitem
+
+Każde zadanie: osobna gałąź → pull request do `main` → review jednej osoby → **Squash and merge**. Szczegółowe komendy i zasady są w [CONTRIBUTING.md](CONTRIBUTING.md).
