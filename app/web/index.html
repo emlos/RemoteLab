@@ -1,30 +1,88 @@
-<!doctype html>
-<html lang="pl">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>badanie</title>
-  </head>
-  <body>
-    <main>
-      <h1>Multimodalne badanie reakcji użytkownika</h1>
+<!-- EKRAN POWITALNY PIERWSZY JAKI SIE WYSWIETLI-->
 
-       <form id="formularz">
-        <label for="kod">Podaj kod:</label>
-        <input type="text" id="kod" name="kod" required />
-        <button type="submit">Begin Test</button>
-      </form>
+<!DOCTYPE html>
+<html lang="en">
 
-      <p>Strona startowa projektu. Moduł badania zostanie dodany później.</p>
-      <a href="/">Strona startowa</a><br>
-      <a href="/calibration">Kalibracja</a><br>
-      <a href="/experiment">Badanie</a>
-    </main>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ipz</title>
+  <link rel="stylesheet" href="../static/style.css">
+</head>
+
+<body class="welcome">
+  <div id="welcome-page">
+    <h1 id="big-text">Badanie reakcji użytkownika</h1>
+    <div id="descp">
+      <p id="description-wp">Podczas badania rejestrujemy mimikę twarzy, wzrok użytkownika oraz jego emocję.</p>
+    </div>
+    <label id="big-text">KOD UCZESTNIKA:</label>
+    <input class="input" type="text" inputmode="numeric">
+
+    <label id="agree-button">
+      <input type="checkbox" id="agree-checkbox">
+      <span id="agree-text">Zgadzam się na użycie kamery i moich danych</span>
+    </label>
+    <button id="dalej-button" disabled>DALEJ</> <!-- PRZYCISK ZADZIALA TYLKO GDY KAMERKA JEST WLACZONA! -->
+    </button>
+
+
+
+  </div>
+
+  <p></p>
+
+  <!-- OKIENKO PYTAJACE O FAKTYCZNA ZGODE O DOSTEP DO KAMERKI-->
   <script>
-      document.getElementById("formularz").addEventListener("submit", function (event) {
-          event.preventDefault();
-          window.location.href = "/experiment";
-        });
-    </script>
-  </body>
-</html>
+    const checkbox = document.getElementById("agree-checkbox");
+    const dalej = document.getElementById("dalej-button");
+
+    let stream = null;
+
+    dalej.style.opacity = "0.5";
+
+    checkbox.addEventListener("change", async function () {
+      if (checkbox.checked) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+
+          //JESLI UZYTKOWNIK STWIERDZI ZE ODZNACZY CHECKBOXA - MA BYC KAMERA WYLACZONA KONIECZNIE
+          if (!checkbox.checked) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+            return;
+          }
+
+          dalej.disabled = false;
+          dalej.style.opacity = "1";
+
+        } catch (error) {
+          alert("Nie udało się uzyskać dostępu do kamery.");
+          checkbox.checked = false;
+        }
+      } else {
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+          stream = null;
+        }
+
+        dalej.disabled = true;
+        dalej.style.opacity = "0.5";
+      }
+    });
+
+    //ZATRZYMANIE KAMERKI PO KLIKNIECIU DALEJ
+    dalej.addEventListener("click", function () {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        window.location.href = "/calibration";
+      }
+    });
+
+  </script>
+</body>
+
+</html>f
