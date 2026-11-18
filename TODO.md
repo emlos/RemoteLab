@@ -10,6 +10,11 @@
 8. informacja czy twarz jest/nie jest widoczna \[Kinga\]
 9. przerwanie testu w przypadku braku widocznej twarzy, gdy znów jest widoczna - kontynuacja testu \[Kinga\]
 10. info o zakończonej kalibracji \[Kinga\]
+11. detekcja oczu i źrenic na podglądzie przed kalibracją \[Marta\]
+12. śledzenie kierunku spojrzenia z filtrowaniem mrugnięć i szumu \[Marta\]
+13. wizualizacja spojrzenia w czasie rzeczywistym \[Marta\]
+14. budowanie i walidacja modelu kalibracji oraz zapis danych do localstorage \[Marta\]
+    
 
 # TO DO
 5. modul js ktory uzywa faceapi [link](https://github.com/justadudewhohacks/face-api.js/blob/master/README.md)
