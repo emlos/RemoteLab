@@ -9,9 +9,33 @@ Jak wiesz nad czym chcesz pracowac to:
 2. pobierz najnowsze zmiany
 3. stworz nowego brancha dla twojego ficzura
 
+<details>
+    <summary>PowerShell (klinknij)</summary>
+    &nbsp
+
 ```powershell
 git checkout main
 git pull origin main
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+</details>
+&nbsp
+<details>
+    <summary>macOS (kliknij)</summary>
+    &nbsp
+
+```bash
+git checkout main
+git pull origin main
+source .venv/bin/activate
+python3 -m alembic upgrade head
+```
+</details>
+
+i na koniec tworzenie twojego brancha:
+
+```powershell
 git checkout -b feature/krotki-opis
 ```
 
